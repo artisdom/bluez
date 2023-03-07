@@ -278,6 +278,8 @@ static void btp_gap_read_commands(uint8_t index, const void *param,
 {
 	uint16_t commands = 0;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (index != BTP_INDEX_NON_CONTROLLER) {
 		btp_send_error(btp, BTP_GAP_SERVICE, index,
 						BTP_ERROR_INVALID_INDEX);
@@ -316,6 +318,8 @@ static void btp_gap_read_controller_index(uint8_t index, const void *param,
 	uint8_t cnt;
 	int i;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (index != BTP_INDEX_NON_CONTROLLER) {
 		btp_send_error(btp, BTP_GAP_SERVICE, index,
 						BTP_ERROR_INVALID_INDEX);
@@ -346,6 +350,8 @@ static void btp_gap_read_info(uint8_t index, const void *param, uint16_t length,
 	struct btp_gap_read_info_rp rp;
 	const char *str;
 	uint8_t status = BTP_ERROR_FAIL;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
@@ -530,6 +536,8 @@ static void btp_gap_reset(uint8_t index, const void *param, uint16_t length,
 	bool prop;
 	uint32_t default_settings;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
 		goto failed;
@@ -623,6 +631,8 @@ static void btp_gap_set_powered(uint8_t index, const void *param,
 	uint8_t status = BTP_ERROR_FAIL;
 	struct set_setting_data *data;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (length < sizeof(*cp))
 		goto failed;
 
@@ -655,6 +665,8 @@ static void btp_gap_set_connectable(uint8_t index, const void *param,
 	const struct btp_gap_set_connectable_cp *cp = param;
 	uint8_t status = BTP_ERROR_FAIL;
 	uint32_t new_settings;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (length < sizeof(*cp))
 		goto failed;
@@ -690,6 +702,8 @@ static void btp_gap_set_discoverable(uint8_t index, const void *param,
 	uint8_t status = BTP_ERROR_FAIL;
 	struct set_setting_data *data;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (length < sizeof(*cp))
 		goto failed;
 
@@ -722,6 +736,8 @@ static void btp_gap_set_bondable(uint8_t index, const void *param,
 	const struct btp_gap_set_bondable_cp *cp = param;
 	uint8_t status = BTP_ERROR_FAIL;
 	struct set_setting_data *data;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (length < sizeof(*cp))
 		goto failed;
@@ -1158,6 +1174,8 @@ static void btp_gap_start_advertising(uint8_t index, const void *param,
 	uint8_t status = BTP_ERROR_FAIL;
 	bool prop;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
 		goto failed;
@@ -1274,6 +1292,8 @@ static void btp_gap_stop_advertising(uint8_t index, const void *param,
 	struct btp_adapter *adapter = find_adapter_by_index(index);
 	uint8_t status = BTP_ERROR_FAIL;
 	bool prop;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
@@ -1401,6 +1421,8 @@ static void btp_gap_start_discovery(uint8_t index, const void *param,
 	const struct btp_gap_start_discovery_cp *cp = param;
 	bool prop;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (!adapter) {
 		btp_send_error(btp, BTP_GAP_SERVICE, index,
 						BTP_ERROR_INVALID_INDEX);
@@ -1497,6 +1519,8 @@ static void btp_gap_stop_discovery(uint8_t index, const void *param,
 {
 	struct btp_adapter *adapter = find_adapter_by_index(index);
 	bool prop;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (!adapter) {
 		btp_send_error(btp, BTP_GAP_SERVICE, index,
@@ -1620,6 +1644,8 @@ static void btp_gap_connect(uint8_t index, const void *param, uint16_t length,
 	bool prop;
 	uint8_t status = BTP_ERROR_FAIL;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
 		goto failed;
@@ -1693,6 +1719,8 @@ static void btp_gap_disconnect(uint8_t index, const void *param,
 	uint8_t status = BTP_ERROR_FAIL;
 	struct btp_device *device;
 	bool prop;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
@@ -2205,6 +2233,8 @@ static void btp_gap_set_io_capabilities(uint8_t index, const void *param,
 	struct rereg_unreg_agent_data *data;
 	bool prop;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	switch (cp->capa) {
 	case BTP_GAP_IOCAPA_DISPLAY_ONLY:
 	case BTP_GAP_IOCAPA_DISPLAY_YESNO:
@@ -2280,6 +2310,8 @@ static void btp_gap_pair(uint8_t index, const void *param, uint16_t length,
 	uint8_t status = BTP_ERROR_FAIL;
 	struct btp_device *device;
 	bool prop;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
@@ -2362,6 +2394,8 @@ static void btp_gap_unpair(uint8_t index, const void *param, uint16_t length,
 	struct btp_device *device;
 	bool prop;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
 		goto failed;
@@ -2422,6 +2456,8 @@ static void btp_gap_passkey_entry_rsp(uint8_t index, const void *param,
 	uint32_t passkey = L_CPU_TO_LE32(cp->passkey);
 	bool prop;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
 		goto failed;
@@ -2477,6 +2513,8 @@ static void btp_gap_confirm_entry_rsp(uint8_t index, const void *param,
 	uint8_t status = BTP_ERROR_FAIL;
 	bool prop;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (!adapter) {
 		status = BTP_ERROR_INVALID_INDEX;
 		goto failed;
@@ -2515,6 +2553,8 @@ static void btp_gap_device_found_ev(struct l_dbus_proxy *proxy)
 	int16_t rssi;
 	uint8_t address_type;
 	bool connected;
+
+	l_debug("proxy: %p", proxy);
 
 	if (!l_dbus_proxy_get_property(proxy, "Address", "s", &addr_str) ||
 					str2ba(addr_str, &ev.address) < 0)
@@ -2561,6 +2601,8 @@ static void btp_gap_device_connection_ev(struct l_dbus_proxy *proxy,
 	const char *str_addr, *str_addr_type;
 	uint8_t address_type;
 
+	l_debug("proxy: %p, connected: %d\n", proxy, connected);
+
 	device = find_device_by_proxy(proxy);
 	adapter = find_adapter_by_device(device);
 
@@ -2603,6 +2645,8 @@ static void btp_identity_resolved_ev(struct l_dbus_proxy *proxy)
 	struct btp_gap_identity_resolved_ev ev;
 	char *str_addr, *str_addr_type;
 	uint8_t identity_address_type;
+
+	l_debug("proxy: %p", proxy);
 
 	if (!l_dbus_proxy_get_property(proxy, "Address", "s", &str_addr))
 		return;
@@ -2690,6 +2734,8 @@ static void btp_core_read_commands(uint8_t index, const void *param,
 {
 	uint8_t commands = 0;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (index != BTP_INDEX_NON_CONTROLLER) {
 		btp_send_error(btp, BTP_CORE_SERVICE, index,
 						BTP_ERROR_INVALID_INDEX);
@@ -2710,6 +2756,8 @@ static void btp_core_read_services(uint8_t index, const void *param,
 {
 	uint8_t services = 0;
 
+	l_debug("index: %d, length: %d\n", index, length);
+
 	if (index != BTP_INDEX_NON_CONTROLLER) {
 		btp_send_error(btp, BTP_CORE_SERVICE, index,
 						BTP_ERROR_INVALID_INDEX);
@@ -2727,6 +2775,8 @@ static void btp_core_register(uint8_t index, const void *param,
 					uint16_t length, void *user_data)
 {
 	const struct btp_core_register_cp  *cp = param;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (length < sizeof(*cp))
 		goto failed;
@@ -2768,6 +2818,8 @@ static void btp_core_unregister(uint8_t index, const void *param,
 					uint16_t length, void *user_data)
 {
 	const struct btp_core_unregister_cp  *cp = param;
+
+	l_debug("index: %d, length: %d\n", index, length);
 
 	if (length < sizeof(*cp))
 		goto failed;
@@ -2832,11 +2884,15 @@ static void signal_handler(uint32_t signo, void *user_data)
 
 static void btp_device_free(struct btp_device *device)
 {
+	l_debug("device: %p", device);
+
 	l_free(device);
 }
 
 static void btp_adapter_free(struct btp_adapter *adapter)
 {
+	l_debug("adapter: %p", adapter);
+
 	l_queue_destroy(adapter->devices,
 				(l_queue_destroy_func_t)btp_device_free);
 	l_free(adapter);
@@ -3084,24 +3140,24 @@ static void property_changed(struct l_dbus_proxy *proxy, const char *name,
 
 static void client_connected(struct l_dbus *dbus, void *user_data)
 {
-	l_info("D-Bus client connected");
+	l_debug("D-Bus client connected");
 }
 
 static void client_disconnected(struct l_dbus *dbus, void *user_data)
 {
-	l_info("D-Bus client disconnected, terminated");
+	l_debug("D-Bus client disconnected, terminated");
 	l_main_quit();
 }
 
 static void btp_disconnect_handler(struct btp *btp, void *user_data)
 {
-	l_info("btp disconnected");
+	l_debug("btp disconnected");
 	l_main_quit();
 }
 
 static void client_ready(struct l_dbus_client *client, void *user_data)
 {
-	l_info("D-Bus client ready, connecting BTP");
+	l_debug("D-Bus client ready, connecting BTP");
 
 	btp = btp_new(socket_path);
 	if (!btp) {
@@ -3149,7 +3205,10 @@ int main(int argc, char *argv[])
 	struct l_dbus_client *client;
 	int opt;
 
-	l_log_set_stderr();
+	// l_log_set_stderr();
+	l_log_set_syslog();
+	// l_log_set_journal();
+	l_debug_enable("*");
 
 	while ((opt = getopt_long(argc, argv, "+hs:vq", options, NULL)) != -1) {
 		switch (opt) {
