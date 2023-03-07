@@ -187,3 +187,6 @@ android/test-*.trs
 cscope.in.out
 cscope.out
 cscope.po.out
+
+build/
+test/__pycache__/
