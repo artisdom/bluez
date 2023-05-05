@@ -555,9 +555,9 @@ test_scripts += test/sap_client.py test/bluezutils.py \
 if BTPCLIENT
 noinst_PROGRAMS += tools/btpclient tools/btpclientctl
 
-tools_btpclient_SOURCES = tools/btpclient.c src/shared/btp.c src/shared/btp.h
+tools_btpclient_SOURCES = tools/btpclient.c src/shared/btp.c src/shared/btp.h btio/btio.h btio/btio.c
 tools_btpclient_LDADD = lib/libbluetooth-internal.la \
-				src/libshared-ell.la $(ell_ldadd)
+				src/libshared-ell.la $(ell_ldadd) src/libshared-glib.la $(GLIB_LIBS)
 tools_btpclient_DEPENDENCIES = lib/libbluetooth-internal.la $(ell_dependencies)
 tools/btpclient.$(OBJEXT): src/libshared-ell.la ell/internal
 

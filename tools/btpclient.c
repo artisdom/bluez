@@ -18,10 +18,13 @@
 #include <getopt.h>
 #include <signal.h>
 
+#include <glib.h>
 #include <ell/ell.h>
 
 #include "lib/bluetooth.h"
 #include "src/shared/btp.h"
+
+#include "btio/btio.h"
 
 #define AD_PATH "/org/bluez/advertising"
 #define AG_PATH "/org/bluez/agent"
@@ -39,6 +42,33 @@
 #define AD_TYPE_MANUFACTURER_DATA		0xff
 
 static void register_gap_service(void);
+static void register_l2cap_service(void);
+
+static GMainLoop *event_loop;
+
+struct ell_event_source {
+	GSource source;
+	GPollFD pollfd;
+};
+
+static gboolean event_prepare(GSource *source, gint *timeout)
+{
+	int r = l_main_prepare();
+	*timeout = r;
+
+	return FALSE;
+}
+
+static gboolean event_check(GSource *source)
+{
+	l_main_iterate(0);
+	return FALSE;
+}
+
+static GSourceFuncs event_funcs = {
+	.prepare = event_prepare,
+	.check = event_check,
+};
 
 static struct l_dbus *dbus;
 
@@ -63,6 +93,9 @@ static char *socket_path;
 static struct btp *btp;
 
 static bool gap_service_registered;
+static bool l2cap_service_registered;
+static bool gatt_client_service_registered;
+static bool gatt_server_service_registered;
 
 struct ad_data {
 	uint8_t data[25];
@@ -116,6 +149,347 @@ static char *dupuuid2str(const uint8_t *uuid, uint8_t len)
 	default:
 		return NULL;
 	}
+}
+
+static void btp_l2cap_read_commands(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	uint16_t commands = 0;
+
+	l_debug("index: %d, length: %d\n", index, length);
+
+	if (index != BTP_INDEX_NON_CONTROLLER) {
+		btp_send_error(btp, BTP_L2CAP_SERVICE, index,
+						BTP_ERROR_INVALID_INDEX);
+		return;
+	}
+
+	commands |= (1 << BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS);
+	commands |= (1 << BTP_OP_L2CAP_CONNECT);
+	commands |= (1 << BTP_OP_L2CAP_DISCONNECT);
+	commands |= (1 << BTP_OP_L2CAP_SEND_DATA);
+	commands |= (1 << BTP_OP_L2CAP_LISTEN);
+	commands |= (1 << BTP_OP_L2CAP_ACCEPT_CONNECTION_REQUEST);
+	commands |= (1 << BTP_OP_L2CAP_RECONFIGURE_REQUEST);
+	commands |= (1 << BTP_OP_L2CAP_CREDITS);
+
+	commands = L_CPU_TO_LE16(commands);
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS,
+			BTP_INDEX_NON_CONTROLLER, sizeof(commands), &commands);
+}
+
+static void btp_l2cap_disconnect(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	uint8_t status = BTP_ERROR_FAIL;
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void btp_l2cap_send_data(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	uint8_t status = BTP_ERROR_FAIL;
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+#define DEFAULT_ACCEPT_TIMEOUT 2
+static int opt_update_sec = 0;
+
+#define DEFAULT_IO_QOS \
+{ \
+	.interval = 10000, \
+	.latency = 10, \
+	.sdu = 40, \
+	.phy = 0x02, \
+	.rtn = 2, \
+}
+
+struct bt_iso_qos qos = {
+	.ucast = {
+		.cig = BT_ISO_QOS_CIG_UNSET,
+		.cis = BT_ISO_QOS_CIG_UNSET,
+		.sca = 0x07,
+		.packing = 0x00,
+		.framing = 0x00,
+		.in = DEFAULT_IO_QOS,
+		.out = DEFAULT_IO_QOS,
+	},
+};
+
+struct io_data {
+	guint ref;
+	GIOChannel *io;
+	int reject;
+	int disconn;
+	int accept;
+	int voice;
+	struct bt_iso_qos *qos;
+};
+
+static void io_data_unref(struct io_data *data)
+{
+	data->ref--;
+
+	if (data->ref)
+		return;
+
+	if (data->io)
+		g_io_channel_unref(data->io);
+
+	g_free(data);
+}
+
+static struct io_data *io_data_ref(struct io_data *data)
+{
+	data->ref++;
+	return data;
+}
+
+static struct io_data *io_data_new(GIOChannel *io, int reject, int disconn,
+								int accept)
+{
+	struct io_data *data;
+
+	data = g_new0(struct io_data, 1);
+	data->io = io;
+	data->reject = reject;
+	data->disconn = disconn;
+	data->accept = accept;
+	data->qos = &qos;
+
+	return io_data_ref(data);
+}
+
+static gboolean io_watch(GIOChannel *io, GIOCondition cond, gpointer user_data)
+{
+	printf("Disconnected\n");
+	return FALSE;
+}
+
+static gboolean disconn_timeout(gpointer user_data)
+{
+	struct io_data *data = user_data;
+
+	printf("Disconnecting\n");
+
+	g_io_channel_shutdown(data->io, TRUE, NULL);
+
+	return FALSE;
+}
+
+static void update_sec_level(struct io_data *data)
+{
+	GError *err = NULL;
+	int sec_level;
+
+	if (!bt_io_get(data->io, &err, BT_IO_OPT_SEC_LEVEL, &sec_level,
+							BT_IO_OPT_INVALID)) {
+		printf("bt_io_get(OPT_SEC_LEVEL): %s\n", err->message);
+		g_clear_error(&err);
+		return;
+	}
+
+	printf("sec_level=%d\n", sec_level);
+
+	if (opt_update_sec == sec_level)
+		return;
+
+	if (!bt_io_set(data->io, &err, BT_IO_OPT_SEC_LEVEL, opt_update_sec,
+							BT_IO_OPT_INVALID)) {
+		printf("bt_io_set(OPT_SEC_LEVEL): %s\n", err->message);
+		g_clear_error(&err);
+	}
+}
+
+static void connect_cb(GIOChannel *io, GError *err, gpointer user_data)
+{
+	struct io_data *data = user_data;
+	GIOCondition cond;
+	char addr[18];
+	uint16_t handle, omtu, imtu;
+	uint8_t cls[3], key_size;
+
+	if (err) {
+		printf("Connecting failed: %s\n", err->message);
+		return;
+	}
+
+	if (!bt_io_get(io, &err,
+			BT_IO_OPT_DEST, addr,
+			BT_IO_OPT_HANDLE, &handle,
+			BT_IO_OPT_CLASS, cls,
+			BT_IO_OPT_INVALID)) {
+		printf("Unable to get destination address: %s\n",
+								err->message);
+		g_clear_error(&err);
+		strcpy(addr, "(unknown)");
+	}
+
+	printf("Successfully connected to %s. handle=%u, class=%02x%02x%02x\n",
+			addr, handle, cls[0], cls[1], cls[2]);
+
+	if (!bt_io_get(io, &err, BT_IO_OPT_OMTU, &omtu,
+					BT_IO_OPT_IMTU, &imtu,
+					BT_IO_OPT_INVALID)) {
+		printf("Unable to get MTU sizes: %s\n", err->message);
+		g_clear_error(&err);
+	} else
+		printf("imtu=%u, omtu=%u\n", imtu, omtu);
+
+	if (!bt_io_get(io, &err, BT_IO_OPT_KEY_SIZE, &key_size,
+							BT_IO_OPT_INVALID)) {
+		printf("Unable to get Key size: %s\n", err->message);
+		g_clear_error(&err);
+	} else
+		printf("key_size=%u\n", key_size);
+
+	if (data->disconn == 0) {
+		g_io_channel_shutdown(io, TRUE, NULL);
+		printf("Disconnected\n");
+		return;
+	}
+
+	if (data->io == NULL)
+		data->io = g_io_channel_ref(io);
+
+	if (data->disconn > 0) {
+		io_data_ref(data);
+		g_timeout_add_seconds_full(G_PRIORITY_DEFAULT, data->disconn,
+					disconn_timeout, data,
+					(GDestroyNotify) io_data_unref);
+	}
+
+
+	io_data_ref(data);
+
+	if (opt_update_sec > 0)
+		update_sec_level(data);
+
+	cond = G_IO_NVAL | G_IO_HUP | G_IO_ERR;
+	g_io_add_watch_full(io, G_PRIORITY_DEFAULT, cond, io_watch, data,
+					(GDestroyNotify) io_data_unref);
+}
+
+static void btp_l2cap_connect(uint8_t index, const void *param, uint16_t length,
+								void *user_data)
+{
+	uint8_t status = BTP_ERROR_FAIL;
+
+	const struct btp_l2cap_connect_cp *cp = param;
+	struct io_data *data;
+	GError *err = NULL;
+	uint8_t addr_type = cp->address_type;
+	uint8_t src_type;
+	int disconn = 0;
+	char dest_str[18] = {0};
+
+	ba2str(&cp->address, dest_str);
+	l_info("Connecting to %s L2CAP PSM %u\n", dest_str, cp->psm);
+
+	data = io_data_new(NULL, -1, disconn, -1);
+
+	if (addr_type != BDADDR_BREDR)
+		src_type = BDADDR_LE_PUBLIC;
+	else
+		src_type = BDADDR_BREDR;
+
+	data->io = bt_io_connect(connect_cb, data,
+				(GDestroyNotify) io_data_unref,
+				&err,
+				BT_IO_OPT_SOURCE_TYPE, src_type,
+				BT_IO_OPT_DEST_BDADDR, &cp->address,
+				BT_IO_OPT_DEST_TYPE, src_type,
+				BT_IO_OPT_PSM, cp->psm,
+				// BT_IO_OPT_CID, cid,
+				// BT_IO_OPT_SEC_LEVEL, sec,
+				// BT_IO_OPT_PRIORITY, prio,
+				BT_IO_OPT_INVALID);
+
+	if (!data->io) {
+		l_error("Connecting to %s failed: %s\n", dest_str, err->message);
+		g_error_free(err);
+		goto failed;
+	}
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void btp_l2cap_listen(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	const struct btp_l2cap_listen_cp *cp = param;
+	struct io_data *data;
+	BtIOConnect conn = connect_cb;
+	BtIOConfirm cfm = NULL;
+	GIOChannel *l2_srv;
+	GError *err = NULL;
+	uint8_t status = BTP_ERROR_FAIL;
+	int reject = 0, disconn = 0, accept = 1;
+	uint16_t cid = 0;
+	gboolean central = true;
+
+	printf("Listening on L2CAP PSM 0x%04x (%u)\n", cp->psm, cp->psm);
+
+	data = io_data_new(NULL, reject, disconn, accept);
+
+	l2_srv = bt_io_listen(conn, cfm, data,
+				(GDestroyNotify) io_data_unref,
+				&err,
+				BT_IO_OPT_SOURCE_TYPE, cp->transport,
+				BT_IO_OPT_PSM, cp->psm,
+				BT_IO_OPT_CID, cid,
+				BT_IO_OPT_SEC_LEVEL, cp->security_type,
+				BT_IO_OPT_CENTRAL, central,
+				BT_IO_OPT_INVALID);
+
+	if (!l2_srv) {
+		printf("Listening failed: %s\n", err->message);
+		g_error_free(err);
+		goto failed;
+	}
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void register_l2cap_service(void)
+{
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS,
+					btp_l2cap_read_commands, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT,
+						btp_l2cap_connect, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
+						btp_l2cap_disconnect, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
+						btp_l2cap_send_data, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
+						btp_l2cap_listen, NULL, NULL);
 }
 
 static bool match_dev_addr_type(const char *addr_type_str, uint8_t addr_type)
@@ -2766,6 +3140,10 @@ static void btp_core_read_services(uint8_t index, const void *param,
 
 	services |= (1 << BTP_CORE_SERVICE);
 	services |= (1 << BTP_GAP_SERVICE);
+	// services |= (1 << BTP_GATT_SERVICE); // DEPRECATED by auto-pts
+	services |= (1 << BTP_L2CAP_SERVICE);
+	services |= (1 << BTP_GATT_CLIENT_SERVICE);
+	services |= (1 << BTP_GATT_SERVER_SERVICE);
 
 	btp_send(btp, BTP_CORE_SERVICE, BTP_OP_CORE_READ_SUPPORTED_SERVICES,
 			BTP_INDEX_NON_CONTROLLER, sizeof(services), &services);
@@ -2798,9 +3176,32 @@ static void btp_core_register(uint8_t index, const void *param,
 			goto failed;
 
 		return;
-	case BTP_GATT_SERVICE:
+
 	case BTP_L2CAP_SERVICE:
+		if (l2cap_service_registered)
+			goto failed;
+
+		register_l2cap_service();
+		l2cap_service_registered = true;
+		break;
+
+	case BTP_GATT_CLIENT_SERVICE:
+		if (gatt_client_service_registered)
+			goto failed;
+
+		gatt_client_service_registered = true;
+		break;
+
+	case BTP_GATT_SERVER_SERVICE:
+		if (gatt_server_service_registered)
+			goto failed;
+
+		gatt_server_service_registered = true;
+		break;
+
 	case BTP_MESH_NODE_SERVICE:
+	case BTP_MESH_MODEL_SERVICE:
+	case BTP_GATT_SERVICE:
 	case BTP_CORE_SERVICE:
 	default:
 		goto failed;
@@ -2838,9 +3239,28 @@ static void btp_core_unregister(uint8_t index, const void *param,
 		btp_unregister_service(btp, BTP_GAP_SERVICE);
 		gap_service_registered = false;
 		break;
-	case BTP_GATT_SERVICE:
+
 	case BTP_L2CAP_SERVICE:
+		if (!l2cap_service_registered)
+			goto failed;
+		l2cap_service_registered = false;
+		break;
+
+	case BTP_GATT_CLIENT_SERVICE:
+		if (!gatt_client_service_registered)
+			goto failed;
+		gatt_client_service_registered = false;
+		break;
+
+	case BTP_GATT_SERVER_SERVICE:
+		if (!gatt_server_service_registered)
+			goto failed;
+		gatt_server_service_registered = false;
+		break;
+
 	case BTP_MESH_NODE_SERVICE:
+	case BTP_MESH_MODEL_SERVICE:
+	case BTP_GATT_SERVICE:
 	case BTP_CORE_SERVICE:
 	default:
 		goto failed;
@@ -3204,6 +3624,7 @@ int main(int argc, char *argv[])
 {
 	struct l_dbus_client *client;
 	int opt;
+	struct ell_event_source *source;
 
 	// l_log_set_stderr();
 	l_log_set_syslog();
@@ -3239,6 +3660,17 @@ int main(int argc, char *argv[])
 	if (!l_main_init())
 		return EXIT_FAILURE;
 
+	event_loop = g_main_loop_new(NULL, FALSE);
+
+	source = (struct ell_event_source *) g_source_new(&event_funcs,
+					sizeof(struct ell_event_source));
+
+	source->pollfd.fd = l_main_get_epoll_fd();
+	source->pollfd.events = G_IO_IN | G_IO_HUP | G_IO_ERR;
+
+	g_source_add_poll((GSource *)source, &source->pollfd);
+	g_source_attach((GSource *) source,
+					g_main_loop_get_context(event_loop));
 
 	adapters = l_queue_new();
 
@@ -3255,7 +3687,8 @@ int main(int argc, char *argv[])
 
 	l_dbus_client_set_ready_handler(client, client_ready, NULL, NULL);
 
-	l_main_run_with_signal(signal_handler, NULL);
+	g_main_loop_run(event_loop);
+	// l_main_run_with_signal(signal_handler, NULL);
 
 	l_dbus_client_destroy(client);
 	l_dbus_destroy(dbus);
@@ -3265,6 +3698,8 @@ int main(int argc, char *argv[])
 
 	l_free(socket_path);
 
+	g_source_destroy((GSource *) source);
+	g_main_loop_unref(event_loop);
 	l_main_exit();
 
 	return EXIT_SUCCESS;
