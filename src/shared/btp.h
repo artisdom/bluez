@@ -323,6 +323,14 @@ struct btp_l2cap_listen_cp {
 
 #define BTP_OP_L2CAP_ACCEPT_CONNECTION_REQUEST	0x06
 #define BTP_OP_L2CAP_RECONFIGURE_REQUEST	0x07
+struct btp_l2cap_reconfigure_request_cp {
+	uint8_t address_type;
+	bdaddr_t address;
+	uint16_t mtu;
+	uint8_t num;
+	uint8_t channels[0];
+} __packed;
+
 #define BTP_OP_L2CAP_CREDITS	0x08
 
 struct btp;

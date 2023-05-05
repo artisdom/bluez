@@ -446,7 +446,7 @@ static void btp_l2cap_listen(uint8_t index, const void *param,
 	uint16_t cid = 0;
 	gboolean central = true;
 
-	printf("Listening on L2CAP PSM 0x%04x (%u)\n", cp->psm, cp->psm);
+	l_info("Listening on L2CAP PSM 0x%04x (%u)\n", cp->psm, cp->psm);
 
 	data = io_data_new(NULL, reject, disconn, accept);
 
@@ -474,6 +474,24 @@ failed:
 	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
 }
 
+static void btp_l2cap_reconfigure_request(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	const struct btp_l2cap_reconfigure_request_cp *cp = param;
+	struct io_data *data;
+	GError *err = NULL;
+
+	l_info("Reconfiguring L2CAP mtu 0x%04x (%u), number of channel: %u\n", cp->mtu, cp->mtu, cp->num);
+
+	data = io_data_new(NULL, 0, 0, 0);
+
+	if (!bt_io_set(data->io, &err, BT_IO_OPT_MTU, cp->mtu,
+							BT_IO_OPT_INVALID)) {
+		printf("bt_io_set(OPT_MTU): %s\n", err->message);
+		g_clear_error(&err);
+	}
+}
+
 static void register_l2cap_service(void)
 {
 	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS,
@@ -490,6 +508,9 @@ static void register_l2cap_service(void)
 
 	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
 						btp_l2cap_listen, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_RECONFIGURE_REQUEST,
+						btp_l2cap_reconfigure_request, NULL, NULL);
 }
 
 static bool match_dev_addr_type(const char *addr_type_str, uint8_t addr_type)

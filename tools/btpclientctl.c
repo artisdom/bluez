@@ -1005,6 +1005,14 @@ static void print_l2cap_listen_cmd(const void *data, uint16_t size)
 					cp->psm, cp->transport, cp->mtu, cp->security_type, cp->key_size, cp->response);
 }
 
+static void print_l2cap_reconfigure_request_cmd(const void *data, uint16_t size)
+{
+	const struct btp_l2cap_reconfigure_request_cp *cp = data;
+
+	bt_shell_printf("mtu: %d, number of channel: %d\n",
+					cp->mtu, cp->num);
+}
+
 static const struct opcode_data opcode_table_gap[] = {
 	{ 0x00, 0, "Error",
 			null_cmd, 0, true,
@@ -1122,6 +1130,9 @@ static const struct opcode_data opcode_table_l2cap[] = {
 			null_rsp, 0, true },
 	{ 0x05, 5, "Listen",
 			print_l2cap_listen_cmd, sizeof(struct btp_l2cap_listen_cp), true,
+			null_rsp, 0, true },
+	{ 0x06, 6, "Reconfigure request",
+			print_l2cap_reconfigure_request_cmd, sizeof(struct btp_l2cap_reconfigure_request_cp), true,
 			null_rsp, 0, true },
 	{ }
 };
@@ -2325,6 +2336,23 @@ static void cmd_l2cap_listen(int argc, char **argv)
 	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
 }
 
+static void cmd_l2cap_reconfigure_request(int argc, char **argv)
+{
+	struct btp_l2cap_reconfigure_request_cp cp;
+
+	memset(&cp, 0, sizeof(cp));
+
+	// if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
+	// 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	cp.mtu = 120;
+	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_RECONFIGURE_REQUEST,
+						bt_index, sizeof(cp), &cp))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
 static const struct bt_shell_menu l2cap_menu = {
 	.name = "l2cap",
 	.desc = "L2CAP API Submenu",
@@ -2339,6 +2367,8 @@ static const struct bt_shell_menu l2cap_menu = {
 		cmd_l2cap_send_data,	"Send Data" },
 	{ "listen",		"<type> <bdaddr>",
 		cmd_l2cap_listen,	"Listen" },
+	{ "reconfigure-request",		"<mtu>",
+		cmd_l2cap_reconfigure_request,	"Reconfigure request" },
 	{ } },
 };
 
