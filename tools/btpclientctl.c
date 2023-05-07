@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <bluetooth/bluetooth.h>
 
 #include "lib/bluetooth.h"
 
@@ -2328,7 +2329,7 @@ static void cmd_l2cap_listen(int argc, char **argv)
 	// if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
 	// 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
 
-	cp.psm = 1;
+	cp.psm = htobs(0x1003);
 	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
 						bt_index, sizeof(cp), &cp))
 		return bt_shell_noninteractive_quit(EXIT_FAILURE);

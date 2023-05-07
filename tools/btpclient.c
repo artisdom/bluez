@@ -445,6 +445,8 @@ static void btp_l2cap_listen(uint8_t index, const void *param,
 	int reject = 0, disconn = 0, accept = 1;
 	uint16_t cid = 0;
 	gboolean central = true;
+	// char src[] = "34:02:86:20:1D:85";
+	char src[] = "00:00:00:00:00:00";
 
 	l_info("Listening on L2CAP PSM 0x%04x (%u)\n", cp->psm, cp->psm);
 
@@ -453,6 +455,7 @@ static void btp_l2cap_listen(uint8_t index, const void *param,
 	l2_srv = bt_io_listen(conn, cfm, data,
 				(GDestroyNotify) io_data_unref,
 				&err,
+				BT_IO_OPT_SOURCE, src,
 				BT_IO_OPT_SOURCE_TYPE, cp->transport,
 				BT_IO_OPT_PSM, cp->psm,
 				BT_IO_OPT_CID, cid,
