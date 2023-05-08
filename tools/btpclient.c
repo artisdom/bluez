@@ -111,6 +111,8 @@ static int rcvbuf = 0;
 static int chan_policy = -1;
 static int bdaddr_type = 0;
 
+static int socket_l2cap = -1; // L2CAP socket created by do_connect().
+
 static void register_gap_service(void);
 static void register_l2cap_service(void);
 
@@ -574,12 +576,18 @@ static void btp_l2cap_disconnect(uint8_t index, const void *param,
 {
 	uint8_t status = BTP_ERROR_FAIL;
 
-	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
-					index, 0, NULL);
-	return;
+	if (socket_l2cap > 0) {
+		close(socket_l2cap);
+		socket_l2cap = -1;
 
-failed:
-	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+		btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
+					index, 0, NULL);
+		return;
+	} else {
+		btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+		return;
+	}
+
 }
 
 static void btp_l2cap_send_data(uint8_t index, const void *param,
@@ -759,10 +767,10 @@ static void btp_l2cap_connect(uint8_t index, const void *param, uint16_t length,
 
 	const struct btp_l2cap_connect_cp *cp = param;
 
-	int sk = do_connect(cp);
-	l_info("btp_l2cap_connect: connected, socket: %d\n", sk);
+	int socket_l2cap = do_connect(cp);
+	l_info("btp_l2cap_connect: connected, socket: %d\n", socket_l2cap);
 
-	if (sk > 0) {
+	if (socket_l2cap > 0) {
 		btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT, index, 0, NULL);
 		return;
 	} else {
