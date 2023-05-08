@@ -915,7 +915,11 @@ static void print_gap_device_connected_evt(const void *data, uint16_t size)
 {
 	const struct btp_gap_device_connected_ev *ev = data;
 
+	bt_shell_printf("\taddress_type: %u\n", ev->address_type);
 	print_bdaddr(&ev->address, ev->address_type);
+	bt_shell_printf("\tconnection_interval: %u\n", ev->connection_interval);
+	bt_shell_printf("\tconnection_latency: %u\n", ev->connection_latency);
+	bt_shell_printf("\tsupervision_timeout: %u\n", ev->supervision_timeout);
 }
 
 static void print_gap_device_disconnected_evt(const void *data, uint16_t size)
@@ -1092,7 +1096,7 @@ static const struct opcode_data opcode_table_gap[] = {
 	{ 0x82, -1, "Device Connected",
 			null_cmd, 0, true,
 			null_rsp, 0, true,
-			print_gap_device_connected_evt, 7, true },
+			print_gap_device_connected_evt, 13, true },
 	{ 0x83, -1, "Device Disconnected",
 			null_cmd, 0, true,
 			null_rsp, 0, true,
@@ -1261,6 +1265,9 @@ static void btp_print_evt(struct btp_hdr *btp_hdr, void *data)
 	}
 
 	print_btp_hdr(btp_hdr, "EVT", opcode_data->str);
+
+	bt_shell_printf("opcode_data->evt_fixed: %d, btp_hdr->data_len: %u, opcode_data->evt_size: %u\n",
+		opcode_data->evt_fixed, btp_hdr->data_len, opcode_data->evt_size);
 
 	if (opcode_data->evt_fixed) {
 		if (btp_hdr->data_len != opcode_data->evt_size) {

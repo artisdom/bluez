@@ -699,7 +699,6 @@ static void do_listen(void (*handler)(int sk))
 		goto error;
 	}
 
-
 	/* Listen for connections */
 	if (listen(sk, 10)) {
 		syslog(LOG_ERR, "Can not listen on the socket: %s (%d)",
@@ -732,12 +731,6 @@ static void do_listen(void (*handler)(int sk))
 							strerror(errno), errno);
 			goto error;
 		}
-		if (fork()) {
-			/* Parent */
-			close(nsk);
-			continue;
-		}
-		/* Child */
 
 		/* Set receive buffer size */
 		if (rcvbuf && setsockopt(nsk, SOL_SOCKET, SO_RCVBUF, &rcvbuf,
@@ -819,7 +812,7 @@ static void do_listen(void (*handler)(int sk))
 
 error:
 	close(sk);
-	exit(1);
+	return;
 }
 
 static void btp_l2cap_listen(uint8_t index, const void *param,
@@ -830,10 +823,15 @@ static void btp_l2cap_listen(uint8_t index, const void *param,
 
 	psm = cp->psm;
 
-	do_listen(dump_mode);
+	if (fork()) {
+		/* Parent */
+		btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
+						index, 0, NULL);
+		return;
+	}
 
-	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
-					index, 0, NULL);
+	/* Child */
+	do_listen(dump_mode);
 	return;
 
 failed:
