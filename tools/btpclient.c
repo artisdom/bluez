@@ -112,6 +112,7 @@ static int chan_policy = -1;
 static int bdaddr_type = 0;
 
 static int socket_l2cap = -1; // L2CAP socket created by do_connect().
+static int socket_l2cap_accepted = -1;  // L2CAP socket accepted in do_listen().
 
 static void register_gap_service(void);
 static void register_l2cap_service(void);
@@ -576,9 +577,11 @@ static void btp_l2cap_disconnect(uint8_t index, const void *param,
 {
 	uint8_t status = BTP_ERROR_FAIL;
 
-	if (socket_l2cap > 0) {
+	if ((socket_l2cap > 0) || (socket_l2cap_accepted > 0)) {
 		close(socket_l2cap);
+		close(socket_l2cap_accepted);
 		socket_l2cap = -1;
+		socket_l2cap_accepted = -1;
 
 		btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
 					index, 0, NULL);
@@ -973,6 +976,7 @@ static void do_listen(void (*handler)(int sk))
 		}
 
 		handler(nsk);
+		socket_l2cap_accepted = nsk;
 		close(sk);
 
 		syslog(LOG_INFO, "Disconnect: %m");
