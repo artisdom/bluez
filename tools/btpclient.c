@@ -77,7 +77,7 @@ static unsigned short psm = 0;
 static unsigned short cid = 0;
 
 /* Default number of frames to send (-1 = infinite) */
-static int num_frames = -1;
+static int num_frames = 2;
 
 /* Default number of consecutive frames before the delay */
 static int count = 1;
@@ -593,17 +593,74 @@ static void btp_l2cap_disconnect(uint8_t index, const void *param,
 
 }
 
+static void do_send(int sk)
+{
+	uint32_t seq;
+	int i, fd, len, buflen, size, sent;
+
+	syslog(LOG_INFO, "Sending ...");
+
+	if (data_size < 0)
+		data_size = omtu;
+
+	for (i = 6; i < data_size; i++)
+		buf[i] = 0x7f;
+
+	if (!count && send_delay)
+		usleep(send_delay);
+
+	seq = seq_start;
+	while ((num_frames == -1) || (num_frames-- > 0)) {
+		put_le32(seq, buf);
+		put_le16(data_size, buf + 4);
+
+		seq++;
+
+		sent = 0;
+		size = data_size;
+		while (size > 0) {
+			buflen = (size > omtu) ? omtu : size;
+
+			len = send(sk, buf, buflen, 0);
+			if (len < 0 || len != buflen) {
+				syslog(LOG_ERR, "Send failed: %s (%d)",
+							strerror(errno), errno);
+				exit(1);
+			}
+
+			sent += len;
+			size -= len;
+		}
+
+		if (num_frames && send_delay && count &&
+						!(seq % (count + seq_start)))
+			usleep(send_delay);
+	}
+}
+
 static void btp_l2cap_send_data(uint8_t index, const void *param,
 					uint16_t length, void *user_data)
 {
 	uint8_t status = BTP_ERROR_FAIL;
 
-	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
-					index, 0, NULL);
-	return;
+	if ((socket_l2cap > 0) || (socket_l2cap_accepted > 0)) {
+		if (socket_l2cap > 0) {
+			l_info("btp_l2cap_send_data to socket_l2cap");
+			do_send(socket_l2cap);
+		}
 
-failed:
-	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+		if (socket_l2cap_accepted > 0) {
+			l_info("btp_l2cap_send_data to socket_l2cap_accepted");
+			do_send(socket_l2cap_accepted);
+		}
+
+		btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
+						index, 0, NULL);
+		return;
+	} else {
+		btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+		return;
+	}
 }
 
 static int do_connect(const struct btp_l2cap_connect_cp *cp)
@@ -4183,6 +4240,8 @@ int main(int argc, char *argv[])
 	// l_log_set_journal();
 	l_debug_enable("*");
 
+	// openlog("btpclient", LOG_PERROR | LOG_PID, LOG_LOCAL0);
+
 	while ((opt = getopt_long(argc, argv, "+hs:vq", options, NULL)) != -1) {
 		switch (opt) {
 		case 's':
@@ -4209,10 +4268,20 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
-	if (!l_main_init())
+	if (data_size < 0)
+		buffer_size = (omtu > imtu) ? omtu : imtu;
+	else
+		buffer_size = data_size;
+
+	if (!(buf = malloc(buffer_size))) {
+		perror("Can't allocate data buffer");
 		return EXIT_FAILURE;
+	}
 
 	hci_devba(0, &bdaddr_local);
+
+	if (!l_main_init())
+		return EXIT_FAILURE;
 
 	adapters = l_queue_new();
 
