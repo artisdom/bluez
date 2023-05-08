@@ -72,7 +72,7 @@ static long data_size = -1;
 static long buffer_size = 2048;
 
 /* Default addr and psm and cid */
-static bdaddr_t bdaddr;
+static bdaddr_t bdaddr_local;
 static unsigned short psm = 0;
 static unsigned short cid = 0;
 
@@ -595,6 +595,163 @@ failed:
 	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
 }
 
+static int do_connect(const struct btp_l2cap_connect_cp *cp)
+{
+	struct sockaddr_l2 addr;
+	struct l2cap_options opts;
+	socklen_t optlen;
+	int sk, opt;
+
+	/* Create socket */
+	sk = socket(PF_BLUETOOTH, socktype, BTPROTO_L2CAP);
+	if (sk < 0) {
+		syslog(LOG_ERR, "Can't create socket: %s (%d)",
+							strerror(errno), errno);
+		return -1;
+	}
+
+	/* Bind to local address */
+	memset(&addr, 0, sizeof(addr));
+	addr.l2_family = AF_BLUETOOTH;
+	bacpy(&addr.l2_bdaddr, &bdaddr_local);
+	addr.l2_bdaddr_type = cp->address_type;
+	if (cid)
+		addr.l2_cid = htobs(cid);
+
+	if (bind(sk, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+		syslog(LOG_ERR, "Can't bind socket: %s (%d)",
+							strerror(errno), errno);
+		goto error;
+	}
+
+	/* Get default options */
+	if (getopts(sk, &opts, false) < 0) {
+		syslog(LOG_ERR, "Can't get default L2CAP options: %s (%d)",
+						strerror(errno), errno);
+		goto error;
+	}
+
+	/* Set new options */
+	opts.omtu = omtu;
+	opts.imtu = imtu;
+	opts.mode = rfcmode;
+
+	opts.fcs = fcs;
+	opts.txwin_size = txwin_size;
+	opts.max_tx = max_transmit;
+
+	if (setopts(sk, &opts) < 0) {
+		syslog(LOG_ERR, "Can't set L2CAP options: %s (%d)",
+							strerror(errno), errno);
+		goto error;
+	}
+
+#if 0
+	/* Enable SO_TIMESTAMP */
+	if (timestamp) {
+		int t = 1;
+
+		if (setsockopt(sk, SOL_SOCKET, SO_TIMESTAMP, &t, sizeof(t)) < 0) {
+			syslog(LOG_ERR, "Can't enable SO_TIMESTAMP: %s (%d)",
+							strerror(errno), errno);
+			goto error;
+		}
+	}
+#endif
+
+	if (chan_policy != -1) {
+		if (setsockopt(sk, SOL_BLUETOOTH, BT_CHANNEL_POLICY,
+				&chan_policy, sizeof(chan_policy)) < 0) {
+			syslog(LOG_ERR, "Can't enable chan policy : %s (%d)",
+							strerror(errno), errno);
+			goto error;
+		}
+	}
+
+	/* Enable SO_LINGER */
+	if (linger) {
+		struct linger l = { .l_onoff = 1, .l_linger = linger };
+
+		if (setsockopt(sk, SOL_SOCKET, SO_LINGER, &l, sizeof(l)) < 0) {
+			syslog(LOG_ERR, "Can't enable SO_LINGER: %s (%d)",
+							strerror(errno), errno);
+			goto error;
+		}
+	}
+
+	/* Set link mode */
+	opt = 0;
+	if (reliable)
+		opt |= L2CAP_LM_RELIABLE;
+	if (central)
+		opt |= L2CAP_LM_MASTER;
+	if (auth)
+		opt |= L2CAP_LM_AUTH;
+	if (encr)
+		opt |= L2CAP_LM_ENCRYPT;
+	if (secure)
+		opt |= L2CAP_LM_SECURE;
+
+	if (setsockopt(sk, SOL_L2CAP, L2CAP_LM, &opt, sizeof(opt)) < 0) {
+		syslog(LOG_ERR, "Can't set L2CAP link mode: %s (%d)",
+							strerror(errno), errno);
+		goto error;
+	}
+
+	/* Set receive buffer size */
+	if (rcvbuf && setsockopt(sk, SOL_SOCKET, SO_RCVBUF,
+						&rcvbuf, sizeof(rcvbuf)) < 0) {
+		syslog(LOG_ERR, "Can't set socket rcv buf size: %s (%d)",
+							strerror(errno), errno);
+		goto error;
+	}
+
+	optlen = sizeof(rcvbuf);
+	if (getsockopt(sk, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &optlen) < 0) {
+		syslog(LOG_ERR, "Can't get socket rcv buf size: %s (%d)",
+							strerror(errno), errno);
+		goto error;
+	}
+
+	/* Connect to remote device */
+	memset(&addr, 0, sizeof(addr));
+	addr.l2_family = AF_BLUETOOTH;
+	bacpy(&addr.l2_bdaddr, &cp->address);
+	addr.l2_bdaddr_type = cp->address_type;
+
+	if (cid)
+		addr.l2_cid = htobs(cid);
+	else if (cp->psm)
+		addr.l2_psm = htobs(cp->psm);
+	else
+		goto error;
+
+	if (connect(sk, (struct sockaddr *) &addr, sizeof(addr)) < 0 ) {
+		syslog(LOG_ERR, "Can't connect: %s (%d)",
+							strerror(errno), errno);
+		goto error;
+	}
+
+	/* Get current options */
+	if (getopts(sk, &opts, true) < 0) {
+		syslog(LOG_ERR, "Can't get L2CAP options: %s (%d)",
+							strerror(errno), errno);
+		goto error;
+	}
+
+	if (print_info(sk, &opts) < 0)
+		goto error;
+
+	omtu = (opts.omtu > buffer_size) ? buffer_size : opts.omtu;
+	imtu = (opts.imtu > buffer_size) ? buffer_size : opts.imtu;
+
+	return sk;
+
+error:
+	close(sk);
+	return -1;
+}
+
 static void btp_l2cap_connect(uint8_t index, const void *param, uint16_t length,
 								void *user_data)
 {
@@ -602,12 +759,16 @@ static void btp_l2cap_connect(uint8_t index, const void *param, uint16_t length,
 
 	const struct btp_l2cap_connect_cp *cp = param;
 
-	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT,
-					index, 0, NULL);
-	return;
+	int sk = do_connect(cp);
+	l_info("btp_l2cap_connect: connected, socket: %d\n", sk);
 
-failed:
-	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+	if (sk > 0) {
+		btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT, index, 0, NULL);
+		return;
+	} else {
+		btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+		return;
+	}
 }
 
 static void do_listen(void (*handler)(int sk))
@@ -628,7 +789,7 @@ static void do_listen(void (*handler)(int sk))
 	/* Bind to local address */
 	memset(&addr, 0, sizeof(addr));
 	addr.l2_family = AF_BLUETOOTH;
-	bacpy(&addr.l2_bdaddr, &bdaddr);
+	bacpy(&addr.l2_bdaddr, &bdaddr_local);
 	addr.l2_bdaddr_type = bdaddr_type;
 	if (cid)
 		addr.l2_cid = htobs(cid);
@@ -4039,6 +4200,7 @@ int main(int argc, char *argv[])
 	if (!l_main_init())
 		return EXIT_FAILURE;
 
+	hci_devba(0, &bdaddr_local);
 
 	adapters = l_queue_new();
 
