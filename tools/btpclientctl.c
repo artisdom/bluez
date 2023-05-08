@@ -41,6 +41,9 @@
 
 #define DEFAULT_INDEX	0x00
 
+#define BREDR_DEFAULT_PSM	0x1011
+#define LE_DEFAULT_PSM		0x0080
+
 struct ad_data {
 	uint8_t data[25];
 	uint8_t len;
@@ -2276,7 +2279,7 @@ static void cmd_l2cap_connect(int argc, char **argv)
 	if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
 		return bt_shell_noninteractive_quit(EXIT_FAILURE);
 
-	cp.psm = 1;
+	cp.psm = BREDR_DEFAULT_PSM;
 	cp.mtu = 672; // 0x02A0
 	cp.num = 1;
 	cp.options = 0;
@@ -2329,7 +2332,8 @@ static void cmd_l2cap_listen(int argc, char **argv)
 	// if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
 	// 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
 
-	cp.psm = htobs(0x1003);
+	cp.psm = BREDR_DEFAULT_PSM;
+	// cp.psm = LE_DEFAULT_PSM;
 	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
 						bt_index, sizeof(cp), &cp))
 		return bt_shell_noninteractive_quit(EXIT_FAILURE);

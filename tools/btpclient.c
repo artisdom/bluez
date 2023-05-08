@@ -446,7 +446,8 @@ static void btp_l2cap_listen(uint8_t index, const void *param,
 	uint16_t cid = 0;
 	gboolean central = true;
 	// char src[] = "34:02:86:20:1D:85";
-	char src[] = "00:00:00:00:00:00";
+	// char src[] = "00:00:00:00:00:00";
+	char src[] = "00:1A:7D:DA:71:15";
 
 	l_info("Listening on L2CAP PSM 0x%04x (%u)\n", cp->psm, cp->psm);
 
