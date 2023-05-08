@@ -1074,6 +1074,24 @@ static void btp_l2cap_reconfigure_request(uint8_t index, const void *param,
 	const struct btp_l2cap_reconfigure_request_cp *cp = param;
 	uint8_t status = BTP_ERROR_FAIL;
 
+	struct l2cap_options opts;
+
+	/* Get default options */
+	if (getopts(socket_l2cap_accepted, &opts, false) < 0) {
+		syslog(LOG_ERR, "btp_l2cap_reconfigure_request, can't get default L2CAP options: %s (%d)",
+						strerror(errno), errno);
+		goto failed;
+	}
+
+	opts.imtu = cp->mtu;
+	opts.omtu = cp->mtu;
+
+	if (setopts(socket_l2cap_accepted, &opts) < 0) {
+		syslog(LOG_ERR, "btp_l2cap_reconfigure_request, can't set L2CAP options: %s (%d)",
+							strerror(errno), errno);
+		goto failed;
+	}
+
 	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_RECONFIGURE_REQUEST,
 					index, 0, NULL);
 	return;
