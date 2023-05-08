@@ -39,6 +39,7 @@
 #define AD_TYPE_MANUFACTURER_DATA		0xff
 
 static void register_gap_service(void);
+static void register_l2cap_service(void);
 
 static struct l_dbus *dbus;
 
@@ -63,6 +64,9 @@ static char *socket_path;
 static struct btp *btp;
 
 static bool gap_service_registered;
+static bool l2cap_service_registered;
+static bool gatt_client_service_registered;
+static bool gatt_server_service_registered;
 
 struct ad_data {
 	uint8_t data[25];
@@ -116,6 +120,124 @@ static char *dupuuid2str(const uint8_t *uuid, uint8_t len)
 	default:
 		return NULL;
 	}
+}
+
+static void btp_l2cap_read_commands(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	uint16_t commands = 0;
+
+	l_debug("index: %d, length: %d\n", index, length);
+
+	if (index != BTP_INDEX_NON_CONTROLLER) {
+		btp_send_error(btp, BTP_L2CAP_SERVICE, index,
+						BTP_ERROR_INVALID_INDEX);
+		return;
+	}
+
+	commands |= (1 << BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS);
+	commands |= (1 << BTP_OP_L2CAP_CONNECT);
+	commands |= (1 << BTP_OP_L2CAP_DISCONNECT);
+	commands |= (1 << BTP_OP_L2CAP_SEND_DATA);
+	commands |= (1 << BTP_OP_L2CAP_LISTEN);
+	commands |= (1 << BTP_OP_L2CAP_ACCEPT_CONNECTION_REQUEST);
+	commands |= (1 << BTP_OP_L2CAP_RECONFIGURE_REQUEST);
+	commands |= (1 << BTP_OP_L2CAP_CREDITS);
+
+	commands = L_CPU_TO_LE16(commands);
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS,
+			BTP_INDEX_NON_CONTROLLER, sizeof(commands), &commands);
+}
+
+static void btp_l2cap_disconnect(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	uint8_t status = BTP_ERROR_FAIL;
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void btp_l2cap_send_data(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	uint8_t status = BTP_ERROR_FAIL;
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void btp_l2cap_connect(uint8_t index, const void *param, uint16_t length,
+								void *user_data)
+{
+	uint8_t status = BTP_ERROR_FAIL;
+
+	const struct btp_l2cap_connect_cp *cp = param;
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void btp_l2cap_listen(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	const struct btp_l2cap_listen_cp *cp = param;
+	uint8_t status = BTP_ERROR_FAIL;
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void btp_l2cap_reconfigure_request(uint8_t index, const void *param,
+					uint16_t length, void *user_data)
+{
+	const struct btp_l2cap_reconfigure_request_cp *cp = param;
+	uint8_t status = BTP_ERROR_FAIL;
+
+	btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_RECONFIGURE_REQUEST,
+					index, 0, NULL);
+	return;
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+}
+
+static void register_l2cap_service(void)
+{
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS,
+					btp_l2cap_read_commands, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT,
+						btp_l2cap_connect, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
+						btp_l2cap_disconnect, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
+						btp_l2cap_send_data, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
+						btp_l2cap_listen, NULL, NULL);
+
+	btp_register(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_RECONFIGURE_REQUEST,
+						btp_l2cap_reconfigure_request, NULL, NULL);
 }
 
 static bool match_dev_addr_type(const char *addr_type_str, uint8_t addr_type)
@@ -2766,6 +2888,10 @@ static void btp_core_read_services(uint8_t index, const void *param,
 
 	services |= (1 << BTP_CORE_SERVICE);
 	services |= (1 << BTP_GAP_SERVICE);
+	// services |= (1 << BTP_GATT_SERVICE); // DEPRECATED by auto-pts
+	services |= (1 << BTP_L2CAP_SERVICE);
+	services |= (1 << BTP_GATT_CLIENT_SERVICE);
+	services |= (1 << BTP_GATT_SERVER_SERVICE);
 
 	btp_send(btp, BTP_CORE_SERVICE, BTP_OP_CORE_READ_SUPPORTED_SERVICES,
 			BTP_INDEX_NON_CONTROLLER, sizeof(services), &services);
@@ -2798,9 +2924,31 @@ static void btp_core_register(uint8_t index, const void *param,
 			goto failed;
 
 		return;
-	case BTP_GATT_SERVICE:
 	case BTP_L2CAP_SERVICE:
+		if (l2cap_service_registered)
+			goto failed;
+
+		register_l2cap_service();
+		l2cap_service_registered = true;
+		break;
+
+	case BTP_GATT_CLIENT_SERVICE:
+		if (gatt_client_service_registered)
+			goto failed;
+
+		gatt_client_service_registered = true;
+		break;
+
+	case BTP_GATT_SERVER_SERVICE:
+		if (gatt_server_service_registered)
+			goto failed;
+
+		gatt_server_service_registered = true;
+		break;
+
 	case BTP_MESH_NODE_SERVICE:
+	case BTP_MESH_MODEL_SERVICE:
+	case BTP_GATT_SERVICE:
 	case BTP_CORE_SERVICE:
 	default:
 		goto failed;
@@ -2838,9 +2986,28 @@ static void btp_core_unregister(uint8_t index, const void *param,
 		btp_unregister_service(btp, BTP_GAP_SERVICE);
 		gap_service_registered = false;
 		break;
-	case BTP_GATT_SERVICE:
+
 	case BTP_L2CAP_SERVICE:
+		if (!l2cap_service_registered)
+			goto failed;
+		l2cap_service_registered = false;
+		break;
+
+	case BTP_GATT_CLIENT_SERVICE:
+		if (!gatt_client_service_registered)
+			goto failed;
+		gatt_client_service_registered = false;
+		break;
+
+	case BTP_GATT_SERVER_SERVICE:
+		if (!gatt_server_service_registered)
+			goto failed;
+		gatt_server_service_registered = false;
+		break;
+
 	case BTP_MESH_NODE_SERVICE:
+	case BTP_MESH_MODEL_SERVICE:
+	case BTP_GATT_SERVICE:
 	case BTP_CORE_SERVICE:
 	default:
 		goto failed;

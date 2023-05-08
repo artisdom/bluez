@@ -26,6 +26,9 @@
 #define BTP_GATT_SERVICE	2
 #define BTP_L2CAP_SERVICE	3
 #define BTP_MESH_NODE_SERVICE	4
+#define BTP_MESH_MODEL_SERVICE	5
+#define BTP_GATT_CLIENT_SERVICE	6
+#define BTP_GATT_SERVER_SERVICE	7
 
 struct btp_hdr {
 	uint8_t service;
@@ -284,6 +287,51 @@ struct btp_gap_identity_resolved_ev {
 	uint8_t identity_address_type;
 	bdaddr_t identity_address;
 } __packed;
+
+#define BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS	0x01
+#define BTP_OP_L2CAP_CONNECT	0x02
+struct btp_l2cap_connect_cp {
+	uint8_t address_type;
+	bdaddr_t address;
+	uint16_t psm;
+	uint16_t mtu;
+	uint8_t num;
+	uint8_t options;
+} __packed;
+
+#define BTP_OP_L2CAP_DISCONNECT	0x03
+struct btp_l2cap_disconnect_cp {
+	uint8_t chan_id;
+} __packed;
+
+#define BTP_OP_L2CAP_SEND_DATA	0x04
+struct btp_l2cap_send_data_cp {
+	uint8_t chan_id;
+	uint16_t data_length;
+	uint8_t data[0];
+} __packed;
+
+#define BTP_OP_L2CAP_LISTEN	0x05
+struct btp_l2cap_listen_cp {
+	uint16_t psm;
+	uint8_t transport;
+	uint16_t mtu;
+	uint8_t security_type;
+	uint8_t key_size;
+	uint16_t response;
+} __packed;
+
+#define BTP_OP_L2CAP_ACCEPT_CONNECTION_REQUEST	0x06
+#define BTP_OP_L2CAP_RECONFIGURE_REQUEST	0x07
+struct btp_l2cap_reconfigure_request_cp {
+	uint8_t address_type;
+	bdaddr_t address;
+	uint16_t mtu;
+	uint8_t num;
+	uint8_t channels[0];
+} __packed;
+
+#define BTP_OP_L2CAP_CREDITS	0x08
 
 struct btp;
 

@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <bluetooth/bluetooth.h>
 
 #include "lib/bluetooth.h"
 
@@ -39,6 +40,9 @@
 #define EVT_OPCODE_BASE	0x80
 
 #define DEFAULT_INDEX	0x00
+
+#define BREDR_DEFAULT_PSM	0x1011
+#define LE_DEFAULT_PSM		0x0080
 
 struct ad_data {
 	uint8_t data[25];
@@ -176,6 +180,18 @@ static bool parse_argument_addr(int argc, char *argv[], uint8_t *addr_type,
 
 	*addr_type = atoi(argv[1]);
 	str2ba(argv[2], bdaddr);
+
+	return true;
+}
+
+static bool parse_argument_uint8(int argc, char *argv[], uint8_t *val)
+{
+	if (argc < 2) {
+		bt_shell_printf("Invalid parameter\n");
+		return false;
+	}
+
+	*val = atoi(argv[1]);
 
 	return true;
 }
@@ -942,6 +958,64 @@ static void print_gap_identity_resolved_evt(const void *data, uint16_t size)
 	print_bdaddr(&ev->identity_address, ev->identity_address_type);
 }
 
+static const struct opcode_data opcode_table_l2cap[];
+
+static void print_l2cap_read_supported_commands_rsp(const void *data,
+								uint16_t size)
+{
+	uint16_t cmds;
+	const char *str;
+	int i;
+
+	cmds = le16_to_cpu(((uint16_t *)data)[0]);
+
+	for (i = 1; i < (int)(sizeof(cmds) * 8); i++) {
+		if (cmds & (1 << i)) {
+			str = get_supported_command(opcode_table_l2cap, i);
+			if (str)
+				bt_shell_printf("\t%s (Bit %d)\n", str, i);
+			else
+				bt_shell_printf("\tUNKNOWN (Bit %d)\n", i);
+		}
+	}
+}
+
+static void print_l2cap_connect_cmd(const void *data, uint16_t size)
+{
+	const struct btp_l2cap_connect_cp *cp = data;
+
+	print_bdaddr(&cp->address, cp->address_type);
+}
+
+static void print_l2cap_disconnect_cmd(const void *data, uint16_t size)
+{
+	const struct btp_l2cap_disconnect_cp *cp = data;
+
+	bt_shell_printf("chan_id: %d\n", cp->chan_id);
+}
+
+static void print_l2cap_send_data_cmd(const void *data, uint16_t size)
+{
+	const struct btp_l2cap_send_data_cp *cp = data;
+
+	bt_shell_printf("chan_id: %d\n", cp->chan_id);
+}
+
+static void print_l2cap_listen_cmd(const void *data, uint16_t size)
+{
+	const struct btp_l2cap_listen_cp *cp = data;
+
+	bt_shell_printf("psm: %d, transport: %d, mtu: %d, security_type: %d, key_size: %d, response: %d\n",
+					cp->psm, cp->transport, cp->mtu, cp->security_type, cp->key_size, cp->response);
+}
+
+static void print_l2cap_reconfigure_request_cmd(const void *data, uint16_t size)
+{
+	const struct btp_l2cap_reconfigure_request_cp *cp = data;
+
+	bt_shell_printf("mtu: %d, number of channel: %d\n",
+					cp->mtu, cp->num);
+}
 
 static const struct opcode_data opcode_table_gap[] = {
 	{ 0x00, 0, "Error",
@@ -1042,9 +1116,35 @@ static const struct opcode_data opcode_table_gap[] = {
 	{ }
 };
 
+static const struct opcode_data opcode_table_l2cap[] = {
+	{ 0x00, 0, "Error",
+			null_cmd, 0, true,
+			print_error_rsp, 1, true },
+	{ 0x01, 1, "Read Supported Commands",
+			null_cmd, 0, true,
+			print_l2cap_read_supported_commands_rsp, 2, true },
+	{ 0x02, 2, "Connect",
+			print_l2cap_connect_cmd, sizeof(struct btp_l2cap_connect_cp), true,
+			null_rsp, 0, true },
+	{ 0x03, 3, "Disconnect",
+			print_l2cap_disconnect_cmd, sizeof(struct btp_l2cap_disconnect_cp), true,
+			null_rsp, 0, true },
+	{ 0x04, 4, "Send Data",
+			print_l2cap_send_data_cmd, sizeof(struct btp_l2cap_send_data_cp), true,
+			null_rsp, 0, true },
+	{ 0x05, 5, "Listen",
+			print_l2cap_listen_cmd, sizeof(struct btp_l2cap_listen_cp), true,
+			null_rsp, 0, true },
+	{ 0x07, 7, "Reconfigure request",
+			print_l2cap_reconfigure_request_cmd, sizeof(struct btp_l2cap_reconfigure_request_cp), true,
+			null_rsp, 0, true },
+	{ }
+};
+
 static const struct service_data service_table[] = {
 	{ 0x00, 0, "Core", opcode_table_core},
 	{ 0x01, 1, "GAP", opcode_table_gap},
+	{ 0x03, 3, "L2CAP", opcode_table_l2cap},
 	{ }
 };
 
@@ -2161,6 +2261,123 @@ static char *ad_clear_gen(const char *text, int state)
 	return argument_gen_name_func_entry(text, state, ad_clear_entry_table);
 }
 
+static void cmd_l2cap_read_cmds(int argc, char **argv)
+{
+	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_READ_SUPPORTED_COMMANDS,
+					BTP_INDEX_NON_CONTROLLER, 0, NULL))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+static void cmd_l2cap_connect(int argc, char **argv)
+{
+	struct btp_l2cap_connect_cp cp;
+
+	memset(&cp, 0, sizeof(cp));
+
+	if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	cp.psm = BREDR_DEFAULT_PSM;
+	cp.mtu = 672; // 0x02A0
+	cp.num = 1;
+	cp.options = 0;
+
+	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_CONNECT,
+						bt_index, sizeof(cp), &cp))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+static void cmd_l2cap_disconnect(int argc, char **argv)
+{
+	struct btp_l2cap_disconnect_cp cp;
+
+	memset(&cp, 0, sizeof(cp));
+
+	if (!parse_argument_uint8(argc, argv, &cp.chan_id))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_DISCONNECT,
+						bt_index, sizeof(cp), &cp))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+static void cmd_l2cap_send_data(int argc, char **argv)
+{
+	struct btp_l2cap_send_data_cp cp;
+
+	memset(&cp, 0, sizeof(cp));
+
+	// if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
+	// 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
+						bt_index, sizeof(cp), &cp))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+static void cmd_l2cap_listen(int argc, char **argv)
+{
+	struct btp_l2cap_listen_cp cp;
+
+	memset(&cp, 0, sizeof(cp));
+
+	// if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
+	// 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	cp.psm = BREDR_DEFAULT_PSM;
+	// cp.psm = LE_DEFAULT_PSM;
+
+	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_LISTEN,
+						bt_index, sizeof(cp), &cp))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+static void cmd_l2cap_reconfigure_request(int argc, char **argv)
+{
+	struct btp_l2cap_reconfigure_request_cp cp;
+
+	memset(&cp, 0, sizeof(cp));
+
+	// if (!parse_argument_addr(argc, argv, &cp.address_type, &cp.address))
+	// 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	cp.mtu = 120;
+	if (!send_cmd(BTP_L2CAP_SERVICE, BTP_OP_L2CAP_RECONFIGURE_REQUEST,
+						bt_index, sizeof(cp), &cp))
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+static const struct bt_shell_menu l2cap_menu = {
+	.name = "l2cap",
+	.desc = "L2CAP API Submenu",
+	.entries = {
+	{ "read-cmds",		NULL,
+		cmd_l2cap_read_cmds,	"Show supported commands" },
+	{ "connect",		"<type> <bdaddr>",
+		cmd_l2cap_connect,	"Connect" },
+	{ "disconnect",		"<chan_id>",
+		cmd_l2cap_disconnect,	"Disconnect" },
+	{ "send-data",		"<type> <bdaddr>",
+		cmd_l2cap_send_data,	"Send Data" },
+	{ "listen",		"<type> <bdaddr>",
+		cmd_l2cap_listen,	"Listen" },
+	{ "reconfigure-request",		"<mtu>",
+		cmd_l2cap_reconfigure_request,	"Reconfigure request" },
+	{ } },
+};
+
 static const struct bt_shell_menu ad_menu = {
 	.name = "ad",
 	.desc = "Advertise Options Submenu",
@@ -2291,6 +2508,7 @@ int main(int argc, char *argv[])
 	bt_shell_set_menu(&main_menu);
 	bt_shell_add_submenu(&ad_menu);
 	bt_shell_add_submenu(&gap_menu);
+	bt_shell_add_submenu(&l2cap_menu);
 
 	btpclientctl = new0(struct btpclientctl, 1);
 	if (!btpclientctl) {
