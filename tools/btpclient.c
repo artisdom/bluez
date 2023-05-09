@@ -700,8 +700,8 @@ static int do_connect(const struct btp_l2cap_connect_cp *cp)
 	}
 
 	/* Set new options */
-	opts.omtu = omtu;
-	opts.imtu = imtu;
+	opts.omtu = cp->mtu;
+	opts.imtu = cp->mtu;
 	opts.mode = rfcmode;
 
 	opts.fcs = fcs;
@@ -839,7 +839,7 @@ static void btp_l2cap_connect(uint8_t index, const void *param, uint16_t length,
 	}
 }
 
-static void do_listen(void (*handler)(int sk))
+static void do_listen(const struct btp_l2cap_listen_cp *cp, void (*handler)(int sk))
 {
 	struct sockaddr_l2 addr;
 	struct l2cap_options opts;
@@ -858,11 +858,11 @@ static void do_listen(void (*handler)(int sk))
 	memset(&addr, 0, sizeof(addr));
 	addr.l2_family = AF_BLUETOOTH;
 	bacpy(&addr.l2_bdaddr, &bdaddr_local);
-	addr.l2_bdaddr_type = bdaddr_type;
+	addr.l2_bdaddr_type = cp->transport;
 	if (cid)
 		addr.l2_cid = htobs(cid);
-	else if (psm)
-		addr.l2_psm = htobs(psm);
+	else if (cp->psm)
+		addr.l2_psm = htobs(cp->psm);
 
 	if (bind(sk, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
 		syslog(LOG_ERR, "Can't bind socket: %s (%d)",
@@ -880,7 +880,7 @@ static void do_listen(void (*handler)(int sk))
 		opt |= L2CAP_LM_AUTH;
 	if (encr)
 		opt |= L2CAP_LM_ENCRYPT;
-	if (secure)
+	if (cp->security_type)
 		opt |= L2CAP_LM_SECURE;
 
 	if (opt && setsockopt(sk, SOL_L2CAP, L2CAP_LM, &opt, sizeof(opt)) < 0) {
@@ -897,8 +897,8 @@ static void do_listen(void (*handler)(int sk))
 	}
 
 	/* Set new options */
-	opts.omtu = omtu;
-	opts.imtu = imtu;
+	opts.omtu = cp->mtu;
+	opts.imtu = cp->mtu;
 	if (rfcmode > 0)
 		opts.mode = rfcmode;
 
@@ -1061,7 +1061,7 @@ static void btp_l2cap_listen(uint8_t index, const void *param,
 	}
 
 	/* Child */
-	do_listen(dump_mode);
+	do_listen(cp, dump_mode);
 	return;
 
 failed:
