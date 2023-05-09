@@ -593,74 +593,60 @@ static void btp_l2cap_disconnect(uint8_t index, const void *param,
 
 }
 
-static void do_send(int sk)
+static int do_send(int sk, const struct btp_l2cap_send_data_cp *cp)
 {
 	uint32_t seq;
 	int i, fd, len, buflen, size, sent;
 
 	syslog(LOG_INFO, "Sending ...");
 
-	if (data_size < 0)
-		data_size = omtu;
+	put_le32(seq_start, buf);
+	put_le16(cp->data_length, buf + 4);
+	memcpy(buf + 6, cp->data, cp->data_length);
 
-	for (i = 6; i < data_size; i++)
-		buf[i] = 0x7f;
+	buflen = cp->data_length + 6;
 
-	if (!count && send_delay)
-		usleep(send_delay);
-
-	seq = seq_start;
-	while ((num_frames == -1) || (num_frames-- > 0)) {
-		put_le32(seq, buf);
-		put_le16(data_size, buf + 4);
-
-		seq++;
-
-		sent = 0;
-		size = data_size;
-		while (size > 0) {
-			buflen = (size > omtu) ? omtu : size;
-
-			len = send(sk, buf, buflen, 0);
-			if (len < 0 || len != buflen) {
-				syslog(LOG_ERR, "Send failed: %s (%d)",
-							strerror(errno), errno);
-				exit(1);
-			}
-
-			sent += len;
-			size -= len;
-		}
-
-		if (num_frames && send_delay && count &&
-						!(seq % (count + seq_start)))
-			usleep(send_delay);
+	len = send(sk, buf, buflen, 0);
+	if (len < 0 || len != buflen) {
+		syslog(LOG_ERR, "Send failed: %s (%d)",
+					strerror(errno), errno);
+		return -1;
 	}
+
+	return len;
 }
 
 static void btp_l2cap_send_data(uint8_t index, const void *param,
 					uint16_t length, void *user_data)
 {
 	uint8_t status = BTP_ERROR_FAIL;
+	const struct btp_l2cap_send_data_cp *cp = param;
 
 	if ((socket_l2cap > 0) || (socket_l2cap_accepted > 0)) {
 		if (socket_l2cap > 0) {
 			l_info("btp_l2cap_send_data to socket_l2cap");
-			do_send(socket_l2cap);
+			if (do_send(socket_l2cap, cp) < 0) {
+				l_info("btp_l2cap_send_data do_send failed.");
+				goto failed;
+			}
 		}
 
 		if (socket_l2cap_accepted > 0) {
 			l_info("btp_l2cap_send_data to socket_l2cap_accepted");
-			do_send(socket_l2cap_accepted);
+			if (do_send(socket_l2cap_accepted, cp) < 0) {
+				l_info("btp_l2cap_send_data do_send failed.");
+				goto failed;
+			}
 		}
 
 		btp_send(btp, BTP_L2CAP_SERVICE, BTP_OP_L2CAP_SEND_DATA,
 						index, 0, NULL);
 		return;
-	} else {
-		btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
-		return;
 	}
+
+failed:
+	btp_send_error(btp, BTP_L2CAP_SERVICE, index, status);
+	return;
 }
 
 static int do_connect(const struct btp_l2cap_connect_cp *cp)
